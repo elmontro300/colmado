@@ -1,53 +1,106 @@
 import streamlit as st
 import pandas as pd
 import sqlite3
+import hashlib
+import os
 
-#----------------login---------------------------
-USUARIO = "admin"
-CONTRASEÑA = "1234"
 
+#----------------login con base de datos---------------------------
+st.set_page_config(page_title="mi registro de productos", page_icon="🔐")
+
+#AQUI SE INICIA EL BENDITO ST.SESSION STATE
 if "login" not in st.session_state:
     st.session_state.login = False
 
-def login():
-    st.title("🔐 Iniciar sesión")
-
-    user = st.text_input("Usuario")
-    password = st.text_input("Contraseña", type="password")
-
-    if st.button("Entrar"):
-        if user == USUARIO and password == CONTRASEÑA:
-            st.session_state.login = True  
-            st.success("Acceso concedido")
-            st.rerun()
-        else:
-            st.error("Usuario y/o contraseña incorrectos")    
-    
-if not st.session_state.login:
-    login()
-    st.stop()
-
-
-
-#------------ config y base de datos de la web---------------------
-st.set_page_config(page_title="Mi registro de productos", page_icon="🛒")
-
-conn = sqlite3.connect("Reg de ventas colmado.db", check_same_thread=False)
+conn = sqlite3.connect("colmado.db", check_same_thread=False)
 cursor = conn.cursor()
 
 cursor.execute("""
-              CREATE TABLE IF NOT EXISTS registros (
-               id INTEGER PRIMARY KEY AUTOINCREMENT,
-              nombre TEXT NOT NULL,
-              precio FLOAT NOT NULL,
-              cantidad INTEGER NOT NULL, 
-              total REAL NOT NULL 
-               )
-               """)
-conn.commit()
- 
+               CREATE TABLE IF NOT EXISTS usuarios (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    usuario TEXT UNIQUE,
+                    password TEXT)
+                    """)
 
-st.title("🛒 Registro de productos")
+cursor.execute("""
+        CREATE TABLE IF NOT EXISTS registros (id INTEGER PRIMARY KEY AUTOINCREMENT,
+               usuario TEXT,
+               nombre TEXT,
+               precio REAL,
+               cantidad INTEGER,
+               total REAL
+            )
+            """)
+
+conn.commit()
+
+#---------------FUNCIONES-----------------
+
+def encriptar(clave):
+    return hashlib.sha256(clave.encode()).hexdigest()
+
+#-----------la sesion-----------
+if not st.session_state.login:
+
+#---------Su sesion----------
+    tab1, tab2 = st.tabs(["🔐 Iniciar sesión", "📝 Registrarse"])
+
+#---------el Login----------------
+
+    with tab1:
+        st.subheader("Entrar")
+
+        user = st.text_input("Usuario", key="login_user").strip()
+        password = st.text_input("Contraseña",type="password", key="login_pass").strip()
+
+        if st.button("Entrar"):
+            clave_hash = encriptar(password)
+
+            cursor.execute(
+                "SELECT * FROM usuarios WHERE usuario=? AND password=?",
+                (user,clave_hash) 
+            )
+
+            usuario = cursor.fetchone()
+
+            if usuario:
+                st.session_state.login = True
+                st.session_state.usuario = user
+                st.success("Bienvenido")
+                st.rerun()
+            else:
+                st.error("Datos incorrectos")
+
+#------- REGISTRO ----------
+    with tab2:
+        st.title("📝 Crear Cuenta")
+
+        nuevo_user = st.text_input("Nuevo usuario", key="reg_user")
+        clave_hash = st.text_input("Nueva contraseña", type="password", key="reg_pass")
+
+        if st.button("Registrarse"):
+            try:
+                clave_hash = encriptar(clave_hash)
+
+                cursor.execute(
+                    "INSERT INTO usuarios (usuario, password) VALUES (?, ?)",
+                    (nuevo_user, clave_hash)
+                )
+                conn.commit()
+
+                st.success("Cuenta creada correctamente")      
+        
+            except:
+                st.error("Ese usario ya existe")
+#-------------------BLOQUEAR APP-----------------
+    if not st.session_state.login:
+        st.stop()                          
+
+
+#TITULOOO-------------------------------------
+st.title("🛒 Sistema de Registro de Productos")
+st.write(f"Bienvenido, {st.session_state.usuario}")
+
 
 #-------------------------- OCULTAR BOTONES DE LA MISMA WEB-----------------------------------
 st.markdown("""
@@ -85,10 +138,6 @@ button[kind="header"] {
 
 
 
-
-# Meoria temporal por el momento--------------------------------------------
-
-
 # Formulario
 with st.form("formulario"):
     nombre = st.text_input("Nombre del producto")
@@ -101,9 +150,9 @@ with st.form("formulario"):
         total = precio * cantidad
 
         cursor.execute("""
-        INSERT INTO registros (nombre, precio, cantidad, total)
-        VALUES (?, ?, ?, ?)
-        """, (nombre, precio, cantidad, total)) 
+        INSERT INTO registros (usuario,nombre, precio, cantidad, total)
+        VALUES (?, ?, ?, ?, ?)
+        """, (st.session_state.usuario,nombre, precio, cantidad, total)) 
 
         conn.commit()
 
@@ -114,7 +163,8 @@ with st.form("formulario"):
 st.subheader("✏️ Editar producto")
 
 #esto leera los productos
-df = pd.read_sql_query("SELECT * FROM registros", conn)
+df = pd.read_sql_query("SELECT * FROM registros WHERE usuario=?", conn,
+            params=(st.session_state.usuario,))
 
 if not df.empty:
     seleccion = st.selectbox(
@@ -164,9 +214,10 @@ if not df.empty:
         st.rerun()  
     if st.button("🗑️ Eliminar producto"):    
         cursor.execute("""
-        DELETE FROM registros
-        WHERE id = ?
-        """, (producto_id,))
+        DELETE FROM registros WHERE id = ? AND usuario = ?,
+        ()
+        """, (producto_id, st.session_state.usuario))
+       
         conn.commit()
 
         st.success("Producto eliminado")
@@ -174,7 +225,9 @@ if not df.empty:
         st.rerun()                                
                        
 #Mostrar la tabla--------
-df = pd.read_sql_query("SELECT * FROM registros", conn)
+df = pd.read_sql_query("SELECT * FROM registros WHERE usuario=?",
+            conn,
+            params=(st.session_state.usuario,))
 
 if not df.empty:
     st.subheader("📦 Productos registrados")
@@ -187,4 +240,4 @@ st.metric("💰 Total General", f"${suma_total:.2f}")
 if st.button("🗑️ Limpiar todo"):
    cursor.execute("DELETE FROM registros")
    conn.commit()
-   st.rerun()            
+   st.rerun()           
