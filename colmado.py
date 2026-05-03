@@ -213,10 +213,9 @@ if not df.empty:
 
         st.rerun()  
     if st.button("🗑️ Eliminar producto"):    
-        cursor.execute("""
-        DELETE FROM registros WHERE id = ? AND usuario = ?,
-        ()
-        """, (producto_id, st.session_state.usuario))
+        cursor.execute(
+        "DELETE FROM registros WHERE id = ? AND usuario = ?"
+            , (producto_id, st.session_state.usuario))
        
         conn.commit()
 
@@ -240,4 +239,4 @@ st.metric("💰 Total General", f"${suma_total:.2f}")
 if st.button("🗑️ Limpiar todo"):
    cursor.execute("DELETE FROM registros")
    conn.commit()
-   st.rerun()           
+   st.rerun()            
